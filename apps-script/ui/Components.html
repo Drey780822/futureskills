@@ -1,0 +1,492 @@
+<script>
+/* =========================================================================
+ * App.js — view controller for the lecturer dashboard.
+ * Views: courses (list), course (detail w/ tabs), analytics, notifications.
+ * ========================================================================= */
+
+const App = (function () {
+  const state = {
+    user: null, courses: [], activeCourseId: null,
+    activeCourse: null, activities: [], analytics: null, notifications: [],
+    view: 'courses', tab: 'activities',
+    filter: '', sort: 'updated', chartInstances: []
+  };
+  const $ = function (sel) { return document.querySelector(sel); };
+  const root = function () { return document.getElementById('view-root'); };
+
+  function init() {
+    ILM.api('bootstrap').then(function (data) {
+      state.user = data.user;
+      renderUser();
+      wireNav();
+      loadCourses();
+    }).catch(function (err) { ILM.toast(err.message, 'error'); });
+  }
+
+  function renderUser() {
+    if (!state.user) return;
+    $('#user-name').textContent = state.user.name || 'Lecturer';
+    $('#user-email').textContent = state.user.email || '';
+    $('#user-avatar').textContent = (state.user.name || 'L')[0].toUpperCase();
+  }
+
+  function wireNav() {
+    document.querySelectorAll('#side-nav button').forEach(function (b) {
+      b.onclick = function () {
+        document.querySelectorAll('#side-nav button').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        state.view = b.dataset.view;
+        if (state.view === 'courses')       loadCourses();
+        else if (state.view === 'analytics')  loadGlobalAnalytics();
+        else if (state.view === 'notifications') loadNotifications();
+        else if (state.view === 'settings')    renderSettings();
+      };
+    });
+    $('#global-search').addEventListener('input', function (e) {
+      state.filter = e.target.value.toLowerCase();
+      if (state.view === 'courses') renderCourses();
+    });
+  }
+
+  // ---------------------- Courses view --------------------------------
+  function loadCourses() {
+    root().innerHTML = renderHero() + '<div class="stats" id="stats">' +
+      ILM.skeleton(4, 90) + '</div>' + '<div class="toolbar"></div>' +
+      '<div class="course-grid" id="courses">' + ILM.skeleton(6) + '</div>';
+
+    Promise.all([ILM.api('globalStats'), ILM.api('listCourses')]).then(function (r) {
+      const stats = r[0]; state.courses = r[1];
+      renderStats(stats);
+      renderCourses();
+    }).catch(function (err) { ILM.toast(err.message, 'error'); });
+  }
+
+  function renderHero() {
+    const hour = new Date().getHours();
+    const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    return '<div class="course-hero">' +
+      '<h1>' + greet + ', ' + ILM.escape((state.user && state.user.name) || 'Lecturer') + '</h1>' +
+      '<p>Welcome back to your teaching workspace. Here\'s what\'s happening across your courses today.</p>' +
+      '</div>';
+  }
+
+  function renderStats(s) {
+    document.getElementById('stats').innerHTML = [
+      statTile('Courses',   s.courses,     'grid_view'),
+      statTile('Activities',s.activities,  'auto_stories'),
+      statTile('Responses', s.responses,   'question_answer'),
+      statTile('Engagement',s.engagement,  'trending_up')
+    ].join('');
+  }
+
+  function statTile(label, value, icon) {
+    return '<div class="stat"><div class="label">' + label + '</div>' +
+           '<div class="value">' + value + '</div>' +
+           '<div class="delta">+ live</div></div>';
+  }
+
+  function renderCourses() {
+    const q = state.filter;
+    const rows = state.courses.filter(function (c) {
+      return !q || (c.name + ' ' + c.code + ' ' + c.description).toLowerCase().indexOf(q) !== -1;
+    });
+    const host = document.getElementById('courses');
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty" style="grid-column:1/-1;">' +
+        '<span class="material-icons-outlined">school</span>' +
+        '<h3 style="margin-top:8px;">No courses yet</h3>' +
+        '<p>Click the + button to create your first course, or seed demo data from the sidebar.</p></div>';
+      return;
+    }
+    host.innerHTML = rows.map(courseCard).join('');
+  }
+
+  function courseCard(c) {
+    return '<div class="card course-card card-lift" onclick="App.openCourse(\'' + c.id + '\')">' +
+      '<div class="course-banner"><span class="code">' + ILM.escape(c.code) + '</span></div>' +
+      '<div class="course-body">' +
+        '<h3>' + ILM.escape(c.name) + '</h3>' +
+        '<div class="desc">' + ILM.escape(c.description || 'No description yet.') + '</div>' +
+        '<div class="course-meta">' +
+          '<span><span class="material-icons-outlined" style="font-size:14px;">layers</span> ' + c.stats.modules + ' modules</span>' +
+          '<span><span class="material-icons-outlined" style="font-size:14px;">auto_stories</span> ' + c.stats.activities + '</span>' +
+          '<span><span class="material-icons-outlined" style="font-size:14px;">forum</span> ' + c.stats.responses + '</span>' +
+          '<span><span class="material-icons-outlined" style="font-size:14px;">bolt</span> ' + c.stats.engagement + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="course-actions" onclick="event.stopPropagation()">' +
+        '<button class="btn btn-sm" onclick="App.openCourse(\'' + c.id + '\')"><span class="material-icons-outlined">arrow_forward</span> Open</button>' +
+        '<button class="btn btn-sm" onclick="App.duplicateCourse(\'' + c.id + '\')"><span class="material-icons-outlined">content_copy</span></button>' +
+        '<button class="btn btn-sm" onclick="App.archiveCourse(\'' + c.id + '\')"><span class="material-icons-outlined">inventory_2</span></button>' +
+        '<button class="btn btn-sm btn-danger" onclick="App.deleteCourse(\'' + c.id + '\')"><span class="material-icons-outlined">delete</span></button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // ---------------------- Course detail -------------------------------
+  function openCourse(id) {
+    state.activeCourseId = id;
+    state.tab = 'activities';
+    root().innerHTML = '<div class="skeleton" style="height:160px; margin-bottom:20px;"></div>' + ILM.skeleton(4);
+    Promise.all([
+      ILM.api('getCourse', { id: id }),
+      ILM.api('listActivities', { courseId: id })
+    ]).then(function (r) {
+      state.activeCourse = r[0]; state.activities = r[1];
+      renderCourseDetail();
+    }).catch(function (err) { ILM.toast(err.message, 'error'); });
+  }
+
+  function renderCourseDetail() {
+    const c = state.activeCourse;
+    root().innerHTML =
+      '<button class="btn btn-ghost" onclick="App.backToCourses()"><span class="material-icons-outlined">arrow_back</span> All courses</button>' +
+      '<div class="course-hero" style="margin-top:12px;">' +
+        '<div style="opacity:.85; font-size:12px; letter-spacing:.1em; text-transform:uppercase;">' + ILM.escape(c.code) + ' · ' + ILM.escape(c.semester || '') + '</div>' +
+        '<h1>' + ILM.escape(c.name) + '</h1>' +
+        '<p>' + ILM.escape(c.description || '') + '</p>' +
+        '<div style="display:flex; gap:20px; margin-top:16px; font-size:13px;">' +
+          heroStat('Modules', c.stats.modules) + heroStat('Activities', c.stats.activities) +
+          heroStat('Responses', c.stats.responses) + heroStat('Engagement', c.stats.engagement) +
+        '</div>' +
+      '</div>' +
+      '<div class="tabs" id="tabs">' +
+        tab('activities','Activities','auto_stories') +
+        tab('analytics','Analytics','insights') +
+        tab('students','Students','groups') +
+        tab('settings','Settings','settings') +
+      '</div>' +
+      '<div id="tab-body"></div>';
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.onclick = function () { state.tab = b.dataset.tab; renderTab(); };
+    });
+    renderTab();
+  }
+
+  function heroStat(l, v) {
+    return '<div><div style="opacity:.7; font-size:11px; letter-spacing:.1em; text-transform:uppercase;">' + l + '</div><div style="font-size:20px; font-weight:700;">' + v + '</div></div>';
+  }
+  function tab(id, label, icon) {
+    return '<button data-tab="' + id + '"' + (state.tab === id ? ' class="active"' : '') + '>' +
+      '<span class="material-icons-outlined" style="font-size:16px; vertical-align:-3px;">' + icon + '</span> ' + label + '</button>';
+  }
+
+  function renderTab() {
+    document.querySelectorAll('#tabs button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.tab === state.tab);
+    });
+    const host = document.getElementById('tab-body');
+    if (state.tab === 'activities') return renderActivities(host);
+    if (state.tab === 'analytics')  return renderCourseAnalytics(host);
+    if (state.tab === 'students')   return renderStudents(host);
+    if (state.tab === 'settings')   return renderCourseSettings(host);
+  }
+
+  function renderActivities(host) {
+    if (!state.activities.length) {
+      host.innerHTML = '<div class="empty"><span class="material-icons-outlined">bolt</span>' +
+        '<h3 style="margin-top:8px;">No activities yet</h3>' +
+        '<p>Click below to create your first Question or Checklist.</p>' +
+        '<button class="btn btn-primary" style="margin-top:12px;" onclick="showCreateActivity()"><span class="material-icons-outlined">add</span> New activity</button></div>';
+      return;
+    }
+    host.innerHTML =
+      '<div class="toolbar">' +
+        '<button class="btn btn-primary" onclick="showCreateActivity()"><span class="material-icons-outlined">add</span> New activity</button>' +
+        '<div style="flex:1;"></div>' +
+        '<span class="chip" onclick="App.sortBy(\'updated\')">Recent</span>' +
+        '<span class="chip" onclick="App.sortBy(\'popular\')">Popular</span>' +
+        '<span class="chip" onclick="App.sortBy(\'module\')">By module</span>' +
+      '</div>' +
+      '<div class="activity-list">' + state.activities.map(activityRow).join('') + '</div>';
+  }
+
+  function activityRow(a) {
+    const icon = a.type === 'checklist' ? 'checklist' : 'quiz';
+    return '<div class="activity">' +
+      '<div class="icon"><span class="material-icons-outlined">' + icon + '</span></div>' +
+      '<div>' +
+        '<div style="font-weight:600;">' + ILM.escape(a.title) + '</div>' +
+        '<div class="meta">' +
+          '<span class="pill">M' + (a.moduleNumber || 1) + '</span>' +
+          '<span class="pill">' + ILM.escape(a.type) + '</span>' +
+          '<span class="pill">' + a.metrics.responses + ' responses</span>' +
+          '<span class="pill">' + a.metrics.likes + ' likes</span>' +
+          '<span>' + new Date(a.createdAt).toLocaleDateString() + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="actions">' +
+        '<button class="icon-btn" title="Copy embed" onclick="App.showEmbed(\'' + a.id + '\')"><span class="material-icons-outlined">code</span></button>' +
+        '<button class="icon-btn" title="Preview" onclick="App.preview(\'' + a.id + '\')"><span class="material-icons-outlined">visibility</span></button>' +
+        '<button class="icon-btn" title="Duplicate" onclick="App.duplicateActivity(\'' + a.id + '\')"><span class="material-icons-outlined">content_copy</span></button>' +
+        '<button class="icon-btn" title="Delete" onclick="App.deleteActivity(\'' + a.id + '\')"><span class="material-icons-outlined">delete_outline</span></button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderCourseAnalytics(host) {
+    host.innerHTML = ILM.skeleton(1, 300);
+    ILM.api('courseAnalytics', { courseId: state.activeCourseId }).then(function (a) {
+      host.innerHTML =
+        '<div class="stats" style="margin-bottom:16px;">' +
+          statTile('Students', a.totals.students, 'groups') +
+          statTile('Responses', a.totals.responses, 'question_answer') +
+          statTile('Likes', a.totals.likes, 'thumb_up') +
+          statTile('Participation', a.totals.participation + '%', 'trending_up') +
+        '</div>' +
+        '<div class="row" style="grid-template-columns:2fr 1fr; align-items:stretch;">' +
+          '<div class="card" style="padding:20px;"><h3>Responses over time</h3><canvas id="chart-series" height="120"></canvas></div>' +
+          '<div class="card" style="padding:20px;"><h3>Sentiment</h3><canvas id="chart-sent" height="120"></canvas></div>' +
+        '</div>' +
+        '<div class="row" style="grid-template-columns:1fr 1fr; margin-top:16px;">' +
+          '<div class="card" style="padding:20px;"><h3>Most popular</h3>' + list(a.topPopular, 'responses') + '</div>' +
+          '<div class="card" style="padding:20px;"><h3>Most difficult</h3>' + list(a.topDifficult, 'dislikes') + '</div>' +
+        '</div>' +
+        (a.atRiskStudents.length ? '<div class="card" style="padding:20px; margin-top:16px; border-color: color-mix(in oklab, var(--warn) 30%, var(--border));">' +
+          '<h3 style="color:var(--warn);"><span class="material-icons-outlined" style="vertical-align:-4px;">warning_amber</span> Students needing intervention</h3>' +
+          '<p style="margin-top:6px;">' + a.atRiskStudents.length + ' student(s) show low participation or long inactivity.</p>' +
+        '</div>' : '');
+
+      drawLine('chart-series', a.series.map(function (s) { return s.day; }), a.series.map(function (s) { return s.responses; }));
+      // sentiment on first activity for demo
+      if (state.activities[0]) {
+        ILM.api('aiSentiment', { activityId: state.activities[0].id }).then(function (s) {
+          drawDoughnut('chart-sent', ['Positive','Neutral','Negative'], [s.positive, s.neutral, s.negative]);
+        });
+      }
+    });
+  }
+
+  function list(rows, key) {
+    if (!rows.length) return '<p style="margin-top:8px;">No data yet.</p>';
+    return '<div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">' +
+      rows.map(function (r) {
+        return '<div style="display:flex; justify-content:space-between; padding:8px 10px; background:var(--bg-soft); border-radius:8px;">' +
+          '<span style="font-size:14px;">' + ILM.escape(r.title) + '</span>' +
+          '<span style="font-weight:600; color:var(--primary);">' + r[key] + '</span></div>';
+      }).join('') + '</div>';
+  }
+
+  function renderStudents(host) {
+    host.innerHTML = ILM.skeleton(1, 240);
+    ILM.api('leaderboard', { courseId: state.activeCourseId }).then(function (rows) {
+      host.innerHTML = '<div class="card" style="padding:20px;">' +
+        '<h3>Anonymous leaderboard</h3>' +
+        '<p>Ranks are anonymous — students see their own rank only.</p>' +
+        '<table style="width:100%; margin-top:12px; border-collapse:separate; border-spacing:0 6px;">' +
+        '<thead><tr style="text-align:left; color:var(--fg-subtle); font-size:12px; text-transform:uppercase;"><th>Rank</th><th>Student</th><th>XP</th><th>Streak</th><th>Badges</th></tr></thead>' +
+        '<tbody>' + rows.map(function (r, i) {
+          return '<tr><td>#' + (i + 1) + '</td><td><span style="font-family:var(--font-mono);">' + r.anonId + '</span></td>' +
+                 '<td style="font-weight:600;">' + r.xp + '</td><td>' + r.streak + '🔥</td><td>' + r.badges + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    });
+  }
+
+  function renderCourseSettings(host) {
+    const c = state.activeCourse;
+    host.innerHTML = '<div class="card" style="padding:22px; max-width:640px;">' +
+      '<h3>Course settings</h3>' +
+      '<div class="field" style="margin-top:12px;"><label>Name</label><input id="s-name" class="input" value="' + ILM.escape(c.name) + '"/></div>' +
+      '<div class="field" style="margin-top:12px;"><label>Description</label><textarea id="s-desc" class="textarea">' + ILM.escape(c.description || '') + '</textarea></div>' +
+      '<button class="btn btn-primary" style="margin-top:14px;" onclick="App.saveCourse()"><span class="material-icons-outlined">save</span> Save</button>' +
+      '</div>';
+  }
+
+  function saveCourse() {
+    const patch = { name: document.getElementById('s-name').value, description: document.getElementById('s-desc').value };
+    ILM.api('updateCourse', { id: state.activeCourseId, patch: patch }).then(function () {
+      ILM.toast('Course updated', 'success'); openCourse(state.activeCourseId);
+    }).catch(function (e) { ILM.toast(e.message, 'error'); });
+  }
+
+  // ---------------------- Charts --------------------------------------
+  function drawLine(id, labels, values) {
+    const el = document.getElementById(id); if (!el) return;
+    new Chart(el, {
+      type: 'line',
+      data: { labels: labels, datasets: [{
+        data: values, label: 'Responses', tension: .4,
+        borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,.15)',
+        fill: true, borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#6366f1'
+      }]},
+      options: { plugins: { legend: { display: false }}, scales: { y: { beginAtZero: true }}}
+    });
+  }
+  function drawDoughnut(id, labels, values) {
+    const el = document.getElementById(id); if (!el) return;
+    new Chart(el, {
+      type: 'doughnut',
+      data: { labels: labels, datasets: [{ data: values, backgroundColor: ['#10b981','#a1a1aa','#ef4444'], borderWidth: 0 }]},
+      options: { plugins: { legend: { position: 'bottom' }}, cutout: '68%' }
+    });
+  }
+
+  // ---------------------- Global analytics view -----------------------
+  function loadGlobalAnalytics() {
+    root().innerHTML = '<h1>Analytics</h1><p style="margin:6px 0 20px;">Cross-course insights across your entire workspace.</p><div class="stats" id="stats">' + ILM.skeleton(4,90) + '</div>';
+    ILM.api('globalStats').then(function (s) {
+      document.getElementById('stats').innerHTML = [
+        statTile('Courses', s.courses, 'grid_view'),
+        statTile('Activities', s.activities, 'auto_stories'),
+        statTile('Responses', s.responses, 'question_answer'),
+        statTile('Engagement', s.engagement, 'trending_up')
+      ].join('');
+    });
+  }
+
+  function loadNotifications() {
+    root().innerHTML = '<h1>Notifications</h1><div id="notif" style="margin-top:16px;">' + ILM.skeleton(4, 60) + '</div>';
+    ILM.api('notifications').then(function (rows) {
+      const host = document.getElementById('notif');
+      if (!rows.length) return host.innerHTML = '<div class="empty"><span class="material-icons-outlined">notifications_none</span><p>All clear.</p></div>';
+      host.innerHTML = rows.map(function (n) {
+        return '<div class="card" style="padding:14px 18px; margin-bottom:8px; display:flex; gap:12px; align-items:center;">' +
+          '<span class="material-icons-outlined" style="color:var(--primary);">notifications</span>' +
+          '<div style="flex:1;"><div style="font-weight:600;">' + ILM.escape(n.title) + '</div>' +
+          '<div style="font-size:13px; color:var(--fg-muted);">' + ILM.escape(n.body) + '</div></div>' +
+          '<span style="font-size:12px; color:var(--fg-subtle);">' + new Date(n.createdAt).toLocaleString() + '</span>' +
+          '</div>';
+      }).join('');
+    });
+  }
+
+  function renderSettings() {
+    root().innerHTML = '<h1>Settings</h1>' +
+      '<div class="card" style="padding:22px; margin-top:16px; max-width:640px;">' +
+        '<h3>Appearance</h3>' +
+        '<button class="btn" style="margin-top:10px;" onclick="ILM.toggleTheme()"><span class="material-icons-outlined">dark_mode</span> Toggle dark mode</button>' +
+        '<h3 style="margin-top:20px;">Demo</h3>' +
+        '<button class="btn btn-primary" style="margin-top:10px;" onclick="seed()"><span class="material-icons-outlined">auto_awesome</span> Seed demo data</button>' +
+      '</div>';
+  }
+
+  // ---------------------- Actions -------------------------------------
+  function backToCourses() {
+    document.querySelectorAll('#side-nav button').forEach(function (b) { b.classList.toggle('active', b.dataset.view === 'courses'); });
+    state.view = 'courses'; loadCourses();
+  }
+  function duplicateCourse(id) { ILM.api('duplicateCourse', { id: id }).then(function () { ILM.toast('Course duplicated', 'success'); loadCourses(); }); }
+  function archiveCourse(id)   { ILM.api('archiveCourse',   { id: id }).then(function () { ILM.toast('Archived','success'); loadCourses(); }); }
+  function deleteCourse(id)    { if (!confirm('Delete this course?')) return;
+    ILM.api('deleteCourse', { id: id }).then(function () { ILM.toast('Deleted','success'); loadCourses(); }); }
+  function duplicateActivity(id) { ILM.api('duplicateActivity', { id: id }).then(function () { openCourse(state.activeCourseId); }); }
+  function deleteActivity(id)    { if (!confirm('Delete?')) return;
+    ILM.api('deleteActivity', { id: id }).then(function () { openCourse(state.activeCourseId); }); }
+  function preview(id) { window.open('?view=student&activityId=' + id, '_blank'); }
+  function showEmbed(id) {
+    ILM.api('getEmbedCode', { id: id }).then(function (code) {
+      document.getElementById('embed-code').value = code;
+      ILM.openModal('modal-embed');
+    });
+  }
+  function sortBy(key) {
+    state.sort = key;
+    if (key === 'popular') state.activities.sort(function (a, b) { return b.metrics.responses - a.metrics.responses; });
+    else if (key === 'module') state.activities.sort(function (a, b) { return (a.moduleNumber||0) - (b.moduleNumber||0); });
+    else state.activities.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+    renderTab();
+  }
+
+  return {
+    init, openCourse, backToCourses,
+    duplicateCourse, archiveCourse, deleteCourse,
+    duplicateActivity, deleteActivity, preview, showEmbed, sortBy, saveCourse
+  };
+})();
+
+// ---------------------- Modal helpers ---------------------------------
+function showCreateCourse() { ILM.openModal('modal-course'); }
+function createCourse() {
+  const payload = {
+    name: document.getElementById('c-name').value.trim(),
+    code: document.getElementById('c-code').value.trim(),
+    semester: document.getElementById('c-sem').value.trim(),
+    description: document.getElementById('c-desc').value.trim()
+  };
+  if (!payload.name || !payload.code) return ILM.toast('Name and code are required', 'error');
+  ILM.api('createCourse', payload).then(function () {
+    ILM.closeModal('modal-course'); ILM.toast('Course created', 'success'); App.init();
+  }).catch(function (e) { ILM.toast(e.message, 'error'); });
+}
+
+function showCreateActivity() {
+  document.getElementById('a-checklist').innerHTML = '';
+  addChecklistRow(); addChecklistRow(); addChecklistRow();
+  ILM.openModal('modal-activity');
+}
+function onActivityTypeChange() {
+  const t = document.getElementById('a-type').value;
+  document.getElementById('a-checklist-wrap').style.display = (t === 'checklist' ? '' : 'none');
+}
+function addChecklistRow() {
+  const wrap = document.getElementById('a-checklist');
+  const row = document.createElement('div');
+  row.className = 'checklist-item';
+  row.innerHTML =
+    '<span class="material-icons-outlined drag">drag_indicator</span>' +
+    '<span class="swatch" style="background:var(--gradient-primary);"></span>' +
+    '<input class="input" placeholder="Item description"/>' +
+    '<button class="icon-btn" onclick="this.parentElement.remove()"><span class="material-icons-outlined">close</span></button>';
+  wrap.appendChild(row);
+  if (window.Sortable && !wrap._sortable) {
+    wrap._sortable = Sortable.create(wrap, { animation: 150, handle: '.drag' });
+  }
+}
+function createActivity() {
+  const type = document.getElementById('a-type').value;
+  const items = Array.from(document.querySelectorAll('#a-checklist .checklist-item input'))
+    .map(function (i) { return { label: i.value.trim() }; }).filter(function (x) { return x.label; });
+  const payload = {
+    courseId: App && window.App ? undefined : undefined
+  };
+  // pull active course from App state via global helper
+  const courseId = (document.querySelector('#tabs') ? window.__activeCourseId : null) || getActiveCourseIdFromApp();
+  const settings = {
+    anonymous: document.getElementById('a-anon').checked,
+    enableLikes: document.getElementById('a-likes').checked,
+    enableComments: document.getElementById('a-comments').checked,
+    enableAISummary: document.getElementById('a-ai').checked
+  };
+  const body = {
+    courseId: courseId, type: type,
+    moduleNumber: Number(document.getElementById('a-module').value || 1),
+    sessionName: document.getElementById('a-session').value,
+    title: document.getElementById('a-title').value,
+    body: document.getElementById('a-body').value,
+    difficulty: document.getElementById('a-diff').value,
+    estMinutes: Number(document.getElementById('a-min').value || 5),
+    tags: document.getElementById('a-tags').value.split(',').map(function (s) { return s.trim(); }).filter(Boolean),
+    settings: settings, checklistItems: items
+  };
+  if (!body.title) return ILM.toast('Title is required','error');
+  if (!body.courseId) return ILM.toast('Open a course first','error');
+  ILM.api('createActivity', body).then(function () {
+    ILM.closeModal('modal-activity'); ILM.toast('Activity published', 'success');
+    App.openCourse(body.courseId);
+  }).catch(function (e) { ILM.toast(e.message, 'error'); });
+}
+function getActiveCourseIdFromApp() {
+  // read the private state via a tiny accessor
+  return (App && App.__state && App.__state.activeCourseId)
+    || (document.querySelector('#tabs') && window.__activeCourseId)
+    || (window.__lastCourseId);
+}
+
+/* Track last opened course id — simplest, avoids exposing state */
+(function () {
+  const origOpen = App.openCourse;
+  App.openCourse = function (id) { window.__lastCourseId = id; origOpen(id); };
+})();
+
+function copyEmbed() {
+  const t = document.getElementById('embed-code'); t.select();
+  document.execCommand('copy');
+  ILM.toast('Embed code copied', 'success');
+}
+
+function seed() {
+  ILM.toast('Seeding demo data…');
+  ILM.api('seedDemo').then(function () { ILM.toast('Demo data ready','success'); App.init(); })
+    .catch(function (e) { ILM.toast(e.message, 'error'); });
+}
+</script>
