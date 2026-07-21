@@ -1,0 +1,110 @@
+<script>
+/* =========================================================================
+ * ILM Client — vanilla JS + google.script.run wrapper.
+ *
+ * All server calls flow through `api(name, payload)` which returns a Promise
+ * and unwraps the { ok, data | error } envelope from API.gs.
+ * ========================================================================= */
+
+const ILM = (function () {
+  // ---------- API wrapper ------------------------------------------------
+  function api(name, payload) {
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (!res) return reject(new Error('Empty server response'));
+          if (res.ok) resolve(res.data);
+          else reject(new Error(res.error || 'Unknown error'));
+        })
+        .withFailureHandler(function (err) { reject(err); })
+        ['API_' + name](payload || {});
+    });
+  }
+
+  // ---------- Toast notifications ---------------------------------------
+  function toast(msg, kind) {
+    const host = document.getElementById('toast-host');
+    const el = document.createElement('div');
+    el.className = 'toast ' + (kind || '');
+    el.innerHTML = '<span class="material-icons-outlined">' +
+      (kind === 'error' ? 'error' : kind === 'success' ? 'check_circle' : 'info') +
+      '</span><span>' + escape(msg) + '</span>';
+    host.appendChild(el);
+    setTimeout(function () { el.style.opacity = 0; setTimeout(function () { el.remove(); }, 200); }, 3200);
+  }
+
+  function escape(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // ---------- Theme -----------------------------------------------------
+  function initTheme() {
+    const saved = localStorage.getItem('ilm.theme') || 'light';
+    document.documentElement.setAttribute('data-theme', saved);
+  }
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', cur);
+    localStorage.setItem('ilm.theme', cur);
+  }
+
+  // ---------- Modal helpers ---------------------------------------------
+  function openModal(id) { document.getElementById(id).classList.add('open'); }
+  function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+  // ---------- Skeleton --------------------------------------------------
+  function skeleton(n, height) {
+    return Array.from({ length: n }).map(function () {
+      return '<div class="skeleton" style="height:' + (height || 88) + 'px"></div>';
+    }).join('');
+  }
+
+  // ---------- Student identity ------------------------------------------
+  function studentIdentity() {
+    let id = localStorage.getItem('ilm.student.id');
+    if (!id) {
+      const fp = [navigator.userAgent, navigator.language, screen.width, screen.height].join('|');
+      id = 'stu_' + Math.random().toString(36).slice(2, 10) + '_' + hash(fp);
+      localStorage.setItem('ilm.student.id', id);
+    }
+    return {
+      id: id,
+      name: localStorage.getItem('ilm.student.name') || '',
+      number: localStorage.getItem('ilm.student.number') || ''
+    };
+  }
+  function saveStudentIdentity(name, number) {
+    localStorage.setItem('ilm.student.name', name);
+    localStorage.setItem('ilm.student.number', number);
+  }
+  function hash(s) {
+    let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h) + s.charCodeAt(i) | 0;
+    return Math.abs(h).toString(36);
+  }
+
+  // ---------- Confetti (checklist completion) ---------------------------
+  function confetti() {
+    const host = document.body;
+    for (let i = 0; i < 80; i++) {
+      const el = document.createElement('div');
+      const size = 6 + Math.random() * 6;
+      Object.assign(el.style, {
+        position: 'fixed', top: '-20px', left: (Math.random() * 100) + '%',
+        width: size + 'px', height: size + 'px',
+        background: ['#6366f1','#06b6d4','#f59e0b','#10b981','#ef4444'][i % 5],
+        borderRadius: (Math.random() > .5 ? '50%' : '3px'),
+        zIndex: 100, pointerEvents: 'none',
+        animation: 'confetti-fall ' + (2 + Math.random() * 2) + 's ease-in forwards',
+        animationDelay: (Math.random() * 0.3) + 's'
+      });
+      host.appendChild(el);
+      setTimeout(function () { el.remove(); }, 4500);
+    }
+  }
+
+  return { api, toast, escape, initTheme, toggleTheme,
+           openModal, closeModal, skeleton,
+           studentIdentity, saveStudentIdentity, confetti };
+})();
+</script>
