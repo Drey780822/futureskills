@@ -12,7 +12,7 @@ const ActivityService = (function () {
   function listActivities(courseId, opts) {
     opts = opts || {};
     const rows = Database.findMany(CONFIG.SHEETS.ACTIVITIES, { courseId: courseId }, {
-      sort: opts.sort || 'updatedAt', desc: opts.desc !== false
+      sort: opts.sort || 'moduleNumber', desc: opts.desc === true
     });
     return rows.map(_hydrateActivity);
   }

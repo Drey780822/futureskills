@@ -15,7 +15,25 @@
 <body>
 <div id="toast-host" class="toast-host"></div>
 
-<div class="app">
+<!-- Google Sign-in gate (shown when lecturer is not authenticated) -->
+<div id="auth-gate" class="auth-gate" style="display:none;">
+  <div class="auth-card">
+    <div class="logo"><span class="material-icons-outlined">school</span></div>
+    <h1>Interactive Learning Module</h1>
+    <p style="margin-top:8px;">Sign in with your Google account to manage courses and activities.</p>
+    <div class="auth-scopes" id="auth-scopes"></div>
+    <button class="btn btn-primary" style="width:100%; justify-content:center; margin-top:8px;" onclick="signInWithGoogle()">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.654 32.657 29.203 36 24 36c-5.202 0-9.619-3.317-11.283-7.946l-7.636 5.877C7.482 38.391 15.18 44 24 44c12.426 0 22.5-10.074 22.5-22.5 0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l7.636 5.877C15.482 15.107 19.402 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C33.891 6.053 29.203 4 24 4 15.18 4 7.482 9.609 4.694 17.691z"/><path fill="#4CAF50" d="M24 44c6.482 0 11.934-2.113 15.904-5.737l-7.352-5.589C30.654 36.657 27.348 38 24 38c-5.202 0-9.619-3.317-11.283-7.946l-7.636 5.877C7.482 38.391 15.18 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571l7.352 5.589C42.022 35.026 44 30.038 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
+      Continue with Google
+    </button>
+    <p class="auth-note">
+      Google may show an "Unverified app" notice during development — this is normal for student projects.
+      ILM only accesses your email and a dedicated Google Sheet for course data. Students using embedded activities do not need to sign in.
+    </p>
+  </div>
+</div>
+
+<div class="app" id="app-shell">
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="brand">
@@ -131,6 +149,26 @@
       </div>
       <div class="field"><label>Tags (comma separated)</label><input class="input" id="a-tags" placeholder="reflection, week 3"/></div>
 
+      <div id="a-question-wrap">
+        <div class="field"><label>Question image URL (optional)</label>
+          <input class="input" id="a-image" placeholder="https://… or Google Drive public link"/>
+        </div>
+        <div class="row">
+          <div class="field"><label>Viewing mode</label>
+            <select id="a-viewing">
+              <option value="post_first">Post first to see others</option>
+              <option value="immediate">See answers immediately</option>
+            </select>
+          </div>
+          <div class="field"><label>Anonymity mode</label>
+            <select id="a-anonymity" onchange="onAnonymityChange()">
+              <option value="require_name">Require student name</option>
+              <option value="allow_anonymous">Allow anonymous posts</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       <div id="a-checklist-wrap" style="display:none;">
         <label style="font-size:12px; font-weight:600; color:var(--fg-muted); text-transform:uppercase; letter-spacing:.06em;">
           Checklist items — drag to reorder
@@ -153,6 +191,40 @@
     <footer>
       <button class="btn" onclick="ILM.closeModal('modal-activity')">Cancel</button>
       <button class="btn btn-primary" onclick="createActivity()"><span class="material-icons-outlined">rocket_launch</span> Publish</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Responses modal -->
+<div class="modal-backdrop" id="modal-responses">
+  <div class="modal" style="width:min(860px, 94vw);">
+    <header>
+      <h2 id="responses-title">Responses</h2>
+      <button class="icon-btn" onclick="ILM.closeModal('modal-responses')"><span class="material-icons-outlined">close</span></button>
+    </header>
+    <div class="body" id="responses-body"></div>
+  </div>
+</div>
+
+<!-- Edit Activity Modal -->
+<div class="modal-backdrop" id="modal-edit-activity">
+  <div class="modal">
+    <header>
+      <h2>Edit activity</h2>
+      <button class="icon-btn" onclick="ILM.closeModal('modal-edit-activity')"><span class="material-icons-outlined">close</span></button>
+    </header>
+    <div class="body">
+      <div class="field"><label>Title / Question</label><textarea class="textarea" id="e-title"></textarea></div>
+      <div class="field"><label>Body / instructions</label><textarea class="textarea" id="e-body"></textarea></div>
+      <div class="row">
+        <div class="field"><label>Module #</label><input class="input" id="e-module" type="number" min="1"/></div>
+        <div class="field"><label>Session name</label><input class="input" id="e-session"/></div>
+      </div>
+      <div class="field" id="e-image-wrap"><label>Question image URL</label><input class="input" id="e-image"/></div>
+    </div>
+    <footer>
+      <button class="btn" onclick="ILM.closeModal('modal-edit-activity')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditActivity()"><span class="material-icons-outlined">save</span> Save</button>
     </footer>
   </div>
 </div>

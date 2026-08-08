@@ -15,7 +15,7 @@
     @media (max-width: 720px) { .qa-layout { grid-template-columns: 1fr; }}
     .q-image {
       border-radius: var(--radius); background: var(--gradient-cool);
-      min-height: 200px; display: grid; place-items: center; color: #fff;
+      min-height: 200px; display: grid; place-items: center; color: #fff; overflow: hidden;
     }
     .checklist-row {
       display: flex; align-items: center; gap: 12px; padding: 12px 14px;
@@ -33,10 +33,11 @@
     .checklist-row.done .box { background: var(--success); border-color: var(--success); color: #fff; }
     .progress { height: 8px; background: var(--bg-soft); border-radius: 999px; overflow: hidden; margin: 10px 0; }
     .progress > div { height: 100%; background: var(--gradient-primary); transition: width .3s ease; }
-    .like-row { display: flex; gap: 8px; margin-top: 12px; }
+    .like-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
     .like-btn { display:inline-flex; gap:6px; align-items:center; padding:8px 14px; border-radius:999px; cursor:pointer;
                 background:var(--bg-soft); border:1px solid var(--border); color:var(--fg-muted); }
-    .like-btn.active { background: var(--primary-50); color: var(--primary); border-color: var(--primary); }
+    .like-btn.active-like { background: var(--primary-50); color: var(--primary); border-color: var(--primary); }
+    .like-btn.active-dislike { background: color-mix(in oklab, var(--danger) 12%, var(--bg-soft)); color: var(--danger); border-color: var(--danger); }
   </style>
 </head>
 <body>
@@ -51,7 +52,7 @@
   <div class="modal" style="width:min(460px, 92vw);">
     <header><h2>Before you begin</h2></header>
     <div class="body">
-      <p>We just need your name and student number once — stored on this device only.</p>
+      <p id="identity-msg">We just need your name and student number once — stored on this device only.</p>
       <div class="field"><label>Full name</label><input id="i-name" class="input"/></div>
       <div class="field"><label>Student number</label><input id="i-num" class="input"/></div>
     </div>
@@ -67,27 +68,34 @@
   let student = ILM.studentIdentity();
   let activity = null;
   let checked = {};
+  let likeCounts = { likes: 0, dislikes: 0 };
+  let myLike = 0;
+
+  function settings() {
+    return (activity && activity.settingsParsed) || {};
+  }
 
   function boot() {
-    if (!student.name || !student.number) return ILM.openModal('modal-identity');
-    load();
-  }
-  function saveIdentity() {
-    const n = document.getElementById('i-name').value.trim();
-    const num = document.getElementById('i-num').value.trim();
-    if (!n || !num) return ILM.toast('Please fill both fields', 'error');
-    ILM.saveStudentIdentity(n, num);
-    student = ILM.studentIdentity();
-    ILM.closeModal('modal-identity');
-    load();
-  }
-  function load() {
     if (!activityId) {
-      document.getElementById('root').innerHTML = '<div class="empty">No activity specified.</div>';
+      document.getElementById('root').innerHTML = '<div class="empty">No activity specified. Use the embed link from your lecturer.</div>';
       return;
     }
     ILM.api('getActivityForStudent', { id: activityId }).then(function (a) {
       activity = a;
+      likeCounts = { likes: a.metrics.likes || 0, dislikes: a.metrics.dislikes || 0 };
+      const s = settings();
+      const allowAnon = !!s.anonymous;
+      if (!allowAnon && (!student.name || !student.number)) {
+        document.getElementById('identity-msg').textContent =
+          'This activity requires your name and student number. Stored on this device only.';
+        ILM.openModal('modal-identity');
+        document.getElementById('root').innerHTML = '';
+        return;
+      }
+      if (allowAnon && !student.name) {
+        ILM.saveStudentIdentity('Anonymous', 'N/A');
+        student = ILM.studentIdentity();
+      }
       if (a.type === 'checklist') renderChecklist();
       else renderQuestion();
       postResize();
@@ -96,10 +104,38 @@
     });
   }
 
+  function saveIdentity() {
+    const n = document.getElementById('i-name').value.trim();
+    const num = document.getElementById('i-num').value.trim();
+    if (!n || !num) return ILM.toast('Please fill both fields', 'error');
+    ILM.saveStudentIdentity(n, num);
+    student = ILM.studentIdentity();
+    ILM.closeModal('modal-identity');
+    if (activity.type === 'checklist') renderChecklist();
+    else renderQuestion();
+    postResize();
+  }
+
+  function load() {
+    boot();
+  }
+
+  function imageHtml() {
+    const url = settings().imageUrl || '';
+    if (url) {
+      return '<div class="q-image"><img src="' + ILM.escape(url) + '" alt="Activity image"/></div>';
+    }
+    return '<div class="q-image"><span class="material-icons-outlined" style="font-size:64px;">psychology</span></div>';
+  }
+
   function renderQuestion() {
+    const s = settings();
+    const showLikes = s.enableLikes !== false;
+    const showComments = s.enableComments !== false;
+
     document.getElementById('root').innerHTML =
       '<div class="qa-layout">' +
-        '<div class="q-image"><span class="material-icons-outlined" style="font-size:64px;">psychology</span></div>' +
+        imageHtml() +
         '<div>' +
           '<div style="font-size:12px; color:var(--fg-subtle); letter-spacing:.08em; text-transform:uppercase;">Module ' + (activity.moduleNumber || 1) + ' · ' + ILM.escape(activity.sessionName || '') + '</div>' +
           '<h1 style="margin:6px 0 12px;">' + ILM.escape(activity.title) + '</h1>' +
@@ -112,22 +148,104 @@
           '<span id="count" style="font-size:12px; color:var(--fg-subtle);">0 characters</span>' +
           '<span id="saved" style="font-size:12px; color:var(--success);"></span>' +
         '</div>' +
-        '<div class="like-row">' +
-          '<button class="like-btn" onclick="like(1, this)"><span class="material-icons-outlined">thumb_up</span> Like</button>' +
-          '<button class="like-btn" onclick="like(-1, this)"><span class="material-icons-outlined">thumb_down</span> Dislike</button>' +
-          '<div style="flex:1;"></div>' +
+        (showLikes ?
+          '<div class="like-row">' +
+            '<button class="like-btn" id="like-up" onclick="like(1, this)"><span class="material-icons-outlined">thumb_up</span> <span id="like-count">' + likeCounts.likes + '</span></button>' +
+            '<button class="like-btn" id="like-down" onclick="like(-1, this)"><span class="material-icons-outlined">thumb_down</span> <span id="dislike-count">' + likeCounts.dislikes + '</span></button>' +
+          '</div>' : '') +
+        '<div style="margin-top:12px; display:flex; justify-content:flex-end;">' +
           '<button class="btn btn-primary" onclick="submitAnswer()"><span class="material-icons-outlined">send</span> Submit answer</button>' +
         '</div>' +
+      '</div>' +
+      (showComments ?
+        '<div class="response-panel">' +
+          '<h3>Comments</h3>' +
+          '<div class="field" style="margin-top:10px;">' +
+            '<textarea id="comment-body" class="textarea" style="min-height:72px;" placeholder="Add a comment…"></textarea>' +
+          '</div>' +
+          '<button class="btn btn-sm" style="margin-top:8px;" onclick="postComment()"><span class="material-icons-outlined">chat</span> Post comment</button>' +
+          '<div id="comments" class="comment-list"></div>' +
+        '</div>' : '') +
+      '<div class="response-panel" id="peer-panel">' +
+        '<h3>Class responses</h3>' +
+        '<div id="peers"><div class="skeleton" style="height:80px;"></div></div>' +
       '</div>';
+
     const draft = localStorage.getItem('ilm.draft.' + activityId);
     if (draft) document.getElementById('answer').value = draft;
     count();
+    if (showComments) loadComments();
+    loadPeers(false);
+  }
+
+  function loadComments() {
+    ILM.api('listComments', { activityId: activityId }).then(function (rows) {
+      const host = document.getElementById('comments');
+      if (!host) return;
+      if (!rows.length) {
+        host.innerHTML = '<p style="font-size:13px; color:var(--fg-subtle); margin-top:8px;">No comments yet — be the first.</p>';
+        return;
+      }
+      host.innerHTML = rows.map(function (c) {
+        return '<div class="comment">' +
+          '<div class="meta">' + ILM.escape(c.authorName || 'Student') + ' · ' + new Date(c.createdAt).toLocaleString() + '</div>' +
+          '<div>' + ILM.escape(c.body) + '</div></div>';
+      }).join('');
+      postResize();
+    });
+  }
+
+  function postComment() {
+    const body = document.getElementById('comment-body').value.trim();
+    if (!body) return ILM.toast('Write a comment first', 'error');
+    ILM.api('addComment', {
+      activityId: activityId,
+      authorId: student.id,
+      authorName: settings().anonymous ? 'Anonymous' : student.name,
+      body: body
+    }).then(function () {
+      document.getElementById('comment-body').value = '';
+      ILM.toast('Comment posted', 'success');
+      loadComments();
+    }).catch(function (e) { ILM.toast(e.message, 'error'); });
+  }
+
+  function loadPeers(afterSubmit) {
+    ILM.api('listPeerResponses', { activityId: activityId, studentId: student.id }).then(function (data) {
+      const host = document.getElementById('peers');
+      if (!host) return;
+      if (data.locked) {
+        host.innerHTML = '<div class="locked-peers"><span class="material-icons-outlined">lock</span><p style="margin-top:8px;">' + ILM.escape(data.message) + '</p></div>';
+        postResize();
+        return;
+      }
+      document.getElementById('like-count').textContent = data.likes;
+      document.getElementById('dislike-count').textContent = data.dislikes;
+      if (!data.responses.length) {
+        host.innerHTML = '<p style="color:var(--fg-muted); font-size:14px;">No responses yet.</p>';
+        postResize();
+        return;
+      }
+      host.innerHTML = data.responses.map(function (r) {
+        return '<div class="peer-item' + (r.isMine ? ' mine' : '') + '">' +
+          '<div class="author">' + ILM.escape(r.author) + (r.isMine ? ' · You' : '') + ' · ' + new Date(r.createdAt).toLocaleString() + '</div>' +
+          '<div>' + ILM.escape(r.text) + '</div></div>';
+      }).join('');
+      if (afterSubmit) {
+        document.getElementById('answer').disabled = true;
+        document.querySelector('.btn-primary[onclick="submitAnswer()"]').style.display = 'none';
+      }
+      postResize();
+    }).catch(function (e) {
+      const host = document.getElementById('peers');
+      if (host) host.innerHTML = '<p style="color:var(--fg-subtle);">' + ILM.escape(e.message) + '</p>';
+    });
   }
 
   function renderChecklist() {
     checked = {};
     document.getElementById('root').innerHTML =
-      '<div style="font-size:12px; color:var(--fg-subtle); letter-spacing:.08em; text-transform:uppercase;">Module ' + (activity.moduleNumber || 1) + ' · Checklist</div>' +
+      '<div style="font-size:12px; color:var(--fg-subtle); letter-spacing:.08em; text-transform:uppercase;">Module ' + (activity.moduleNumber || 1) + ' · ' + ILM.escape(activity.sessionName || '') + '</div>' +
       '<h1 style="margin:6px 0 12px;">' + ILM.escape(activity.title) + '</h1>' +
       '<p>' + ILM.escape(activity.body || '') + '</p>' +
       '<div class="progress" style="margin-top:14px;"><div id="progress-bar" style="width:0%"></div></div>' +
@@ -139,7 +257,7 @@
             '<div>' + ILM.escape(it.label) + '</div></div>';
         }).join('') +
       '</div>' +
-      '<button class="btn btn-primary" style="margin-top:14px;" onclick="submitChecklist()"><span class="material-icons-outlined">done_all</span> Submit</button>';
+      '<button class="btn btn-primary" style="margin-top:14px;" onclick="submitChecklist()"><span class="material-icons-outlined">done_all</span> Submit checklist</button>';
   }
 
   function toggleItem(id, el) {
@@ -151,9 +269,11 @@
   }
 
   function count() {
-    const n = document.getElementById('answer').value.length;
-    document.getElementById('count').textContent = n + ' characters';
+    const el = document.getElementById('answer');
+    if (!el) return;
+    document.getElementById('count').textContent = el.value.length + ' characters';
   }
+
   function autosave() {
     const v = document.getElementById('answer').value;
     localStorage.setItem('ilm.draft.' + activityId, v);
@@ -172,12 +292,7 @@
     }).then(function () {
       localStorage.removeItem('ilm.draft.' + activityId);
       ILM.toast('Response submitted', 'success');
-      document.getElementById('root').innerHTML =
-        '<div class="card" style="padding:32px; text-align:center;">' +
-          '<span class="material-icons-outlined" style="font-size:56px; color:var(--success);">check_circle</span>' +
-          '<h1 style="margin-top:10px;">Thank you!</h1>' +
-          '<p>Your answer has been submitted.</p></div>';
-      postResize();
+      loadPeers(true);
     }).catch(function (e) { ILM.toast(e.message, 'error'); });
   }
 
@@ -195,27 +310,34 @@
       document.getElementById('root').innerHTML =
         '<div class="card" style="padding:24px;">' +
           '<h1>You scored ' + score + '%</h1>' +
-          '<p>Nice work! Here\'s how you compare to the class:</p>' +
-          '<div class="stats" style="margin-top:16px;">' +
+          '<p>Nice work! Here\'s how you compare to the class (all responses are anonymous):</p>' +
+          '<div class="stats" style="margin-top:16px; grid-template-columns: repeat(2, 1fr);">' +
             '<div class="stat"><div class="label">Class average</div><div class="value">' + s.avg + '%</div></div>' +
             '<div class="stat"><div class="label">Median</div><div class="value">' + s.median + '%</div></div>' +
             '<div class="stat"><div class="label">Highest</div><div class="value">' + s.max + '%</div></div>' +
             '<div class="stat"><div class="label">Lowest</div><div class="value">' + s.min + '%</div></div>' +
-          '</div></div>';
+          '</div>' +
+          '<div class="progress" style="margin-top:20px;"><div style="width:' + score + '%; height:100%; background:var(--gradient-primary);"></div></div>' +
+          '<p style="margin-top:10px; font-size:13px;">Your score: <strong>' + score + '%</strong> vs class average: <strong>' + s.avg + '%</strong></p>' +
+        '</div>';
       postResize();
     }).catch(function (e) { ILM.toast(e.message, 'error'); });
   }
 
   function like(value, el) {
-    document.querySelectorAll('.like-btn').forEach(function (b) { b.classList.remove('active'); });
-    el.classList.add('active');
+    if (myLike === value) value = 0;
+    myLike = value;
+    document.querySelectorAll('.like-btn').forEach(function (b) {
+      b.classList.remove('active-like', 'active-dislike');
+    });
+    if (value === 1) el.classList.add('active-like');
+    if (value === -1) el.classList.add('active-dislike');
     ILM.api('toggleLike', {
       targetType: 'activity', targetId: activityId,
-      actorId: student.id, value: value
-    });
+      actorId: student.id, value: value || 1
+    }).then(function () { loadPeers(false); });
   }
 
-  /* Auto-resize the iframe in the host page */
   function postResize() {
     setTimeout(function () {
       const h = document.body.scrollHeight + 20;

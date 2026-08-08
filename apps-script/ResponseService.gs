@@ -132,8 +132,78 @@ const ResponseService = (function () {
     });
   }
 
+  /** Student-facing peer responses (respects viewing + anonymity settings). */
+  function listPeerResponses(input) {
+    Helpers.requireFields(input, ['activityId', 'studentId']);
+    const a = Database.findOne(CONFIG.SHEETS.ACTIVITIES, { id: input.activityId });
+    if (!a || a.status === CONFIG.STATUS.DELETED) throw new Error('Activity not available');
+
+    const settings = Helpers.safeParse(a.settings, {});
+    const viewingMode = settings.viewingMode || 'immediate';
+    const anonymous = !!settings.anonymous;
+
+    const mine = Database.findMany(CONFIG.SHEETS.RESPONSES, {
+      activityId: input.activityId, studentId: input.studentId
+    });
+    if (viewingMode === 'post_first' && !mine.length) {
+      return { locked: true, message: 'Submit your answer first to see how others responded.' };
+    }
+
+    const rows = Database.findMany(CONFIG.SHEETS.RESPONSES, { activityId: input.activityId }, {
+      sort: 'createdAt', desc: true
+    });
+    const likes = Database.findMany(CONFIG.SHEETS.LIKES, { targetId: input.activityId, targetType: 'activity' });
+
+    return {
+      locked: false,
+      responses: rows.map(function (r) {
+        const p = Helpers.safeParse(r.payload, {});
+        return {
+          id: r.id,
+          text: p.text || '',
+          author: anonymous ? 'Anonymous' : (r.studentName || 'Student'),
+          createdAt: r.createdAt,
+          isMine: r.studentId === input.studentId
+        };
+      }),
+      likes: likes.filter(function (l) { return l.value === 1; }).length,
+      dislikes: likes.filter(function (l) { return l.value === -1; }).length,
+      hasSubmitted: mine.length > 0
+    };
+  }
+
+  /** All responses across activities in a course (lecturer). */
+  function listCourseResponses(courseId) {
+    const course = Database.findOne(CONFIG.SHEETS.COURSES, { id: courseId });
+    if (!course) throw new Error('Course not found');
+    Auth.requireOwner(course);
+
+    const activities = Database.findMany(CONFIG.SHEETS.ACTIVITIES, { courseId: courseId });
+    const actMap = {};
+    activities.forEach(function (a) { actMap[a.id] = a; });
+
+    const rows = Database.findMany(CONFIG.SHEETS.RESPONSES, { courseId: courseId }, {
+      sort: 'createdAt', desc: true
+    });
+    return rows.map(function (r) {
+      const p = Helpers.safeParse(r.payload, {});
+      const a = actMap[r.activityId] || {};
+      return {
+        id: r.id,
+        activityId: r.activityId,
+        activityTitle: a.title || '',
+        activityType: a.type || '',
+        studentName: r.anonymous ? 'Anonymous' : (r.studentName || 'Student'),
+        studentNumber: r.anonymous ? '' : (r.studentNumber || ''),
+        text: p.text || '',
+        score: p.score,
+        createdAt: r.createdAt
+      };
+    });
+  }
+
   return {
-    submitResponse, listResponses, getChecklistStats,
-    toggleLike, addComment, listComments
+    submitResponse, listResponses, listPeerResponses, listCourseResponses,
+    getChecklistStats, toggleLike, addComment, listComments
   };
 })();

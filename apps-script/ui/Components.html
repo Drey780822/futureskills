@@ -16,11 +16,34 @@ const App = (function () {
 
   function init() {
     ILM.api('bootstrap').then(function (data) {
+      if (!data.user || !data.user.authenticated || !data.user.email) {
+        showAuthGate(data.auth);
+        return;
+      }
+      hideAuthGate();
       state.user = data.user;
       renderUser();
       wireNav();
       loadCourses();
     }).catch(function (err) { ILM.toast(err.message, 'error'); });
+  }
+
+  function showAuthGate(auth) {
+    document.getElementById('auth-gate').style.display = 'grid';
+    document.getElementById('app-shell').style.display = 'none';
+    document.querySelector('.fab').style.display = 'none';
+    const host = document.getElementById('auth-scopes');
+    const scopes = (auth && auth.scopes) || [];
+    host.innerHTML = scopes.map(function (s) {
+      return '<div class="auth-scope"><span class="material-icons-outlined" style="color:var(--primary);">verified_user</span>' +
+        '<div><strong>' + ILM.escape(s.label) + '</strong><span>' + ILM.escape(s.reason) + '</span></div></div>';
+    }).join('');
+  }
+
+  function hideAuthGate() {
+    document.getElementById('auth-gate').style.display = 'none';
+    document.getElementById('app-shell').style.display = '';
+    document.querySelector('.fab').style.display = '';
   }
 
   function renderUser() {

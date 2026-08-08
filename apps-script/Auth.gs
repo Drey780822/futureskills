@@ -12,7 +12,9 @@ const Auth = (function () {
 
   /** Return { email, name, picture, role } for the current lecturer. */
   function getCurrentUser() {
-    const email = Session.getActiveUser().getEmail() || '';
+    const email = Session.getActiveUser().getEmail()
+      || Session.getEffectiveUser().getEmail()
+      || '';
     if (!email) {
       return { email: '', name: 'Guest', role: 'guest', authenticated: false };
     }
@@ -60,7 +62,35 @@ const Auth = (function () {
     }
   }
 
-  return { getCurrentUser, requireOwner, checkRateLimit };
+  /** Auth status for the friendly sign-in screen. */
+  function getAuthStatus() {
+    const email = Session.getActiveUser().getEmail()
+      || Session.getEffectiveUser().getEmail()
+      || '';
+    return {
+      authenticated: !!email,
+      email: email,
+      appName: CONFIG.APP_NAME,
+      org: CONFIG.ORG,
+      scopes: [
+        { id: 'email', label: 'Your Google email', reason: 'Identify you as the course owner' },
+        { id: 'sheets', label: 'Google Sheets', reason: 'Store courses, activities, and student responses' },
+      ],
+    };
+  }
+
+  /** Ping used to trigger OAuth consent on first lecturer sign-in. */
+  function ping() {
+    const email = Session.getActiveUser().getEmail()
+      || Session.getEffectiveUser().getEmail()
+      || '';
+    if (!email) {
+      throw new Error('Sign in required — open this app while logged into your Google account, then try again.');
+    }
+    return { email: email, user: getCurrentUser() };
+  }
+
+  return { getCurrentUser, getAuthStatus, ping, requireOwner, checkRateLimit };
 })();
 
 /** Convenient audit log writer used across services. */

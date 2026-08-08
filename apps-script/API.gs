@@ -5,6 +5,9 @@
  * Every call is wrapped in `_safe` for uniform error shape + audit logging.
  *
  * Frontend always calls: google.script.run.API_<name>(payload).
+ *
+ * IMPORTANT: Each API_* entry MUST be a top-level `function` declaration.
+ * google.script.run cannot invoke const/let bindings or object methods.
  * -----------------------------------------------------------------------------
  */
 
@@ -20,49 +23,64 @@ function _safe(fn) {
 }
 
 // ---------- Bootstrap / session -------------------------------------------
-const API_bootstrap        = _safe(function ()   { return { user: Auth.getCurrentUser(), config: {
-  activityTypes: CONFIG.ACTIVITY_TYPES, features: CONFIG.FEATURES, appVersion: CONFIG.APP_VERSION
-}}; });
+function API_bootstrap(payload) {
+  return _safe(function () {
+    return {
+      user: Auth.getCurrentUser(),
+      auth: Auth.getAuthStatus(),
+      config: {
+        activityTypes: CONFIG.ACTIVITY_TYPES,
+        features: CONFIG.FEATURES,
+        appVersion: CONFIG.APP_VERSION
+      }
+    };
+  })(payload);
+}
+
+function API_authStatus(payload)   { return _safe(function ()          { return Auth.getAuthStatus(); })(payload); }
+function API_authPing(payload)     { return _safe(function ()          { return Auth.ping(); })(payload); }
 
 // ---------- Courses --------------------------------------------------------
-const API_listCourses      = _safe(function ()          { return CourseService.listCourses(); });
-const API_getCourse        = _safe(function (p)         { return CourseService.getCourse(p.id); });
-const API_createCourse     = _safe(function (p)         { return CourseService.createCourse(p); });
-const API_updateCourse     = _safe(function (p)         { return CourseService.updateCourse(p.id, p.patch); });
-const API_duplicateCourse  = _safe(function (p)         { return CourseService.duplicateCourse(p.id); });
-const API_archiveCourse    = _safe(function (p)         { return CourseService.archiveCourse(p.id); });
-const API_deleteCourse     = _safe(function (p)         { return CourseService.deleteCourse(p.id); });
+function API_listCourses(payload)      { return _safe(function ()          { return CourseService.listCourses(); })(payload); }
+function API_getCourse(payload)        { return _safe(function (p)         { return CourseService.getCourse(p.id); })(payload); }
+function API_createCourse(payload)     { return _safe(function (p)         { return CourseService.createCourse(p); })(payload); }
+function API_updateCourse(payload)     { return _safe(function (p)         { return CourseService.updateCourse(p.id, p.patch); })(payload); }
+function API_duplicateCourse(payload)  { return _safe(function (p)         { return CourseService.duplicateCourse(p.id); })(payload); }
+function API_archiveCourse(payload)    { return _safe(function (p)         { return CourseService.archiveCourse(p.id); })(payload); }
+function API_deleteCourse(payload)     { return _safe(function (p)         { return CourseService.deleteCourse(p.id); })(payload); }
 
 // ---------- Activities -----------------------------------------------------
-const API_listActivities   = _safe(function (p)         { return ActivityService.listActivities(p.courseId, p); });
-const API_getActivity      = _safe(function (p)         { return ActivityService.getActivity(p.id); });
-const API_createActivity   = _safe(function (p)         { return ActivityService.createActivity(p); });
-const API_updateActivity   = _safe(function (p)         { return ActivityService.updateActivity(p.id, p.patch); });
-const API_duplicateActivity= _safe(function (p)         { return ActivityService.duplicateActivity(p.id); });
-const API_deleteActivity   = _safe(function (p)         { return ActivityService.deleteActivity(p.id); });
-const API_getEmbedCode     = _safe(function (p)         { return ActivityService.getEmbedCode(p.id); });
+function API_listActivities(payload)   { return _safe(function (p)         { return ActivityService.listActivities(p.courseId, p); })(payload); }
+function API_getActivity(payload)      { return _safe(function (p)         { return ActivityService.getActivity(p.id); })(payload); }
+function API_createActivity(payload)   { return _safe(function (p)         { return ActivityService.createActivity(p); })(payload); }
+function API_updateActivity(payload)   { return _safe(function (p)         { return ActivityService.updateActivity(p.id, p.patch); })(payload); }
+function API_duplicateActivity(payload){ return _safe(function (p)         { return ActivityService.duplicateActivity(p.id); })(payload); }
+function API_deleteActivity(payload)   { return _safe(function (p)         { return ActivityService.deleteActivity(p.id); })(payload); }
+function API_getEmbedCode(payload)     { return _safe(function (p)         { return ActivityService.getEmbedCode(p.id); })(payload); }
 
 // ---------- Student side (called from the iframe) --------------------------
-const API_getActivityForStudent = _safe(function (p)    { return ActivityService.getActivityForStudent(p.id); });
-const API_submitResponse   = _safe(function (p)         { return ResponseService.submitResponse(p); });
-const API_toggleLike       = _safe(function (p)         { return ResponseService.toggleLike(p); });
-const API_addComment       = _safe(function (p)         { return ResponseService.addComment(p); });
-const API_listComments     = _safe(function (p)         { return ResponseService.listComments(p.activityId); });
-const API_getChecklistStats= _safe(function (p)         { return ResponseService.getChecklistStats(p.activityId); });
-const API_leaderboard      = _safe(function (p)         { return GamificationService.leaderboard(p.courseId); });
-const API_myProgress       = _safe(function (p)         { return GamificationService.myProgress(p.studentId); });
+function API_getActivityForStudent(payload) { return _safe(function (p)    { return ActivityService.getActivityForStudent(p.id); })(payload); }
+function API_submitResponse(payload)   { return _safe(function (p)         { return ResponseService.submitResponse(p); })(payload); }
+function API_toggleLike(payload)       { return _safe(function (p)         { return ResponseService.toggleLike(p); })(payload); }
+function API_addComment(payload)       { return _safe(function (p)         { return ResponseService.addComment(p); })(payload); }
+function API_listComments(payload)     { return _safe(function (p)         { return ResponseService.listComments(p.activityId); })(payload); }
+function API_listPeerResponses(payload){ return _safe(function (p)        { return ResponseService.listPeerResponses(p); })(payload); }
+function API_getChecklistStats(payload){ return _safe(function (p)         { return ResponseService.getChecklistStats(p.activityId); })(payload); }
+function API_leaderboard(payload)      { return _safe(function (p)         { return GamificationService.leaderboard(p.courseId); })(payload); }
+function API_myProgress(payload)       { return _safe(function (p)         { return GamificationService.myProgress(p.studentId); })(payload); }
 
 // ---------- Lecturer analytics --------------------------------------------
-const API_listResponses    = _safe(function (p)         { return ResponseService.listResponses(p.activityId); });
-const API_courseAnalytics  = _safe(function (p)         { return AnalyticsService.courseAnalytics(p.courseId); });
-const API_globalStats      = _safe(function ()          { return AnalyticsService.globalStats(); });
-const API_aiSummary        = _safe(function (p)         { return AIService.summarizeResponses(p.activityId); });
-const API_aiSentiment      = _safe(function (p)         { return AIService.sentimentBreakdown(p.activityId); });
+function API_listResponses(payload)    { return _safe(function (p)         { return ResponseService.listResponses(p.activityId); })(payload); }
+function API_listCourseResponses(payload) { return _safe(function (p)      { return ResponseService.listCourseResponses(p.courseId); })(payload); }
+function API_courseAnalytics(payload)  { return _safe(function (p)         { return AnalyticsService.courseAnalytics(p.courseId); })(payload); }
+function API_globalStats(payload)      { return _safe(function ()          { return AnalyticsService.globalStats(); })(payload); }
+function API_aiSummary(payload)        { return _safe(function (p)         { return AIService.summarizeResponses(p.activityId); })(payload); }
+function API_aiSentiment(payload)      { return _safe(function (p)         { return AIService.sentimentBreakdown(p.activityId); })(payload); }
 
 // ---------- Notifications --------------------------------------------------
-const API_notifications    = _safe(function ()          { return NotificationService.inbox(); });
-const API_markRead         = _safe(function (p)         { return NotificationService.markRead(p.id); });
-const API_announce         = _safe(function (p)         { return NotificationService.announce(p.courseId, p.title, p.body); });
+function API_notifications(payload)    { return _safe(function ()          { return NotificationService.inbox(); })(payload); }
+function API_markRead(payload)         { return _safe(function (p)         { return NotificationService.markRead(p.id); })(payload); }
+function API_announce(payload)         { return _safe(function (p)         { return NotificationService.announce(p.courseId, p.title, p.body); })(payload); }
 
 // ---------- Admin ----------------------------------------------------------
-const API_seedDemo         = _safe(function ()          { return SeedData.seedAll(); });
+function API_seedDemo(payload)         { return _safe(function ()          { return SeedData.seedAll(); })(payload); }
